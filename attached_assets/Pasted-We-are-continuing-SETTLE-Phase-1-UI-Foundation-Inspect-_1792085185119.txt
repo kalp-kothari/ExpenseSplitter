@@ -1,0 +1,55 @@
+We are continuing SETTLE Phase 1: UI Foundation.
+
+Inspect the existing implementation before making changes. Preserve the current working features, theme system, and project structure wherever possible.
+
+GOAL:
+Polish the existing interface so it feels like a premium, modern expense-sharing product rather than a generic dashboard.
+
+1. DESKTOP LAYOUT
+- Ensure the dashboard uses the available desktop width effectively.
+- Keep a persistent sidebar on larger screens.
+- Use a balanced content width and comfortable spacing.
+- Display summary cards in a clean horizontal layout where space permits.
+- Use a suitable responsive layout for groups and recent expenses.
+- Do not force desktop users into a narrow, phone-sized layout.
+
+2. MOBILE LAYOUT
+- Preserve the existing mobile-friendly navigation.
+- Keep cards readable and comfortably spaced.
+- Prevent horizontal overflow.
+- Ensure buttons and touch targets are easy to use.
+
+3. VISUAL POLISH
+- Improve typography hierarchy and section spacing.
+- Refine card padding, borders, corner radii, and shadows.
+- Use green accents consistently.
+- Use subtle gradients only where they improve the design.
+- Make the interface distinctive without overcrowding it.
+- Keep text readable in both themes.
+
+4. ANIMATIONS
+- Add subtle hover and press feedback to interactive elements.
+- Use smooth transitions for cards, navigation states, and theme changes.
+- Avoid excessive motion and unnecessary animation dependencies.
+- Respect prefers-reduced-motion.
+
+5. LIGHT AND DARK THEMES
+- Preserve the existing theme toggle and localStorage persistence.
+- Verify the backgrounds, cards, borders, text, icons, and controls in both themes.
+- Fix any contrast or readability issues.
+- Do not create a separate layout for each theme.
+
+6. FUNCTIONALITY
+- Preserve all existing working features.
+- Do not introduce backend services, authentication, or database integration.
+- Do not implement Phase 2 features yet.
+- Do not make unfinished buttons appear functional.
+
+7. VALIDATION
+- Run the available TypeScript checks and production build.
+- Fix any errors introduced by the changes.
+- Summarize the files modified and the improvements made.
+
+IMPORTANT:
+Make targeted improvements to the existing application. Do not rewrite the project from scratch or remove working functionality.
+Stop after completing this UI polish pass.

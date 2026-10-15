@@ -1,0 +1,1 @@
+- [SETTLE Phase 1 scope](settle-phase1-scope.md) — keep work UI-only; no auth, backend, database, or real expense flows until Phase 2 is requested.

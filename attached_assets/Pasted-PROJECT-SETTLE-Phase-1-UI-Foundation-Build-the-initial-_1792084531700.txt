@@ -1,0 +1,97 @@
+PROJECT: SETTLE — Phase 1, UI Foundation
+
+Build the initial frontend of SETTLE, a modern group expense-sharing website with an app-like interface.
+
+IMPORTANT:
+This is Phase 1 only. Focus on the visual design, responsive layout, theme system, and dashboard. Do not implement the complete expense management system yet.
+
+TECH STACK:
+- React
+- TypeScript
+- Tailwind CSS, if already configured or supported by the project
+- Use the existing project setup where possible.
+- Avoid unnecessary dependencies.
+
+DESIGN DIRECTION:
+Create a polished, modern fintech interface using a hybrid aesthetic with both dark and light themes.
+
+Dark theme:
+- Deep charcoal backgrounds.
+- Slightly lighter surfaces and cards.
+- Subtle borders and gradients.
+- Vibrant green accent color.
+
+Light theme:
+- Off-white background.
+- White cards.
+- Subtle borders and soft shadows.
+- The same green accent color.
+
+Both themes must use consistent typography, spacing, border radii, and component styles.
+
+DASHBOARD:
+1. Create a desktop sidebar with the SETTLE logo and navigation items:
+   - Dashboard
+   - Groups
+   - Expenses
+   - Settlements
+2. Add a top bar containing a page heading, theme toggle, and profile placeholder.
+3. Add three summary cards:
+   - Total Balance
+   - You Owe
+   - You Are Owed
+4. Add a Groups section containing realistic sample groups.
+5. Add a Recent Expenses section with sample expenses.
+6. Include visually prominent Create Group and Add Expense buttons.
+7. Use realistic sample data with INR currency formatting.
+8. Make the dashboard feel like a real product, not a generic admin template.
+
+THEME SYSTEM:
+- Implement working light and dark theme switching.
+- Use a reusable theme mechanism rather than duplicating the interface.
+- Persist the selected theme in localStorage.
+- On the first visit, use the system preference if available.
+- Ensure text, cards, borders, inputs, and navigation remain readable in both themes.
+- Make switching themes smooth without excessive animation.
+
+INTERACTIONS AND ANIMATIONS:
+- Add subtle hover and focus states to interactive elements.
+- Use restrained transitions and micro-interactions.
+- Avoid excessive bouncing, spinning, or distracting effects.
+- Respect the user's reduced-motion preference.
+- Do not make unfinished features appear functional.
+
+RESPONSIVENESS:
+- Desktop: persistent sidebar and spacious dashboard.
+- Tablet: adapt spacing and navigation appropriately.
+- Mobile: use a compact layout with suitable mobile navigation.
+- Prevent horizontal overflow at all supported screen sizes.
+- Keep buttons and touch targets comfortable to use on phones.
+
+CODE QUALITY:
+- Use reusable components.
+- Keep components organized and readable.
+- Separate sample data from presentation components where appropriate.
+- Use clear TypeScript types.
+- Avoid putting the entire application into one giant component.
+- Do not introduce authentication, a database, or a backend in this phase.
+- Do not implement fake functionality for unfinished features.
+
+WORKFLOW:
+1. Inspect the existing project before making changes.
+2. Briefly explain the implementation approach.
+3. Build the Phase 1 dashboard.
+4. Run the available checks and fix any errors.
+5. Summarize the files created or modified.
+6. Explain how to run the application and test the theme toggle.
+
+ACCEPTANCE CRITERIA:
+- The application starts without errors.
+- The dashboard looks polished in both themes.
+- The theme toggle works and remembers the selection after refresh.
+- All dashboard sections are visible and readable.
+- The layout works on desktop, tablet, and mobile.
+- Existing working functionality is not unnecessarily removed.
+- No buttons falsely claim to perform unfinished actions.
+
+Do not proceed to Phase 2. Stop after completing Phase 1.

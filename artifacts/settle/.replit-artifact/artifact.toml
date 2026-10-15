@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "SETTLE"
+description = "A responsive group expense-sharing dashboard foundation with INR sample data, quick balance summaries, group and recent expense previews, and a reusable light/dark theme toggle. Phase 1 is a visual and interaction foundation only, with no accounts, backend, or unfinished expense actions."
+version = "1.0.0"
+id = "artifacts/settle"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 18674
+
+[services.development]
+run = "pnpm --filter @workspace/settle run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/settle", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/settle/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "18674"
+BASE_PATH = "/"

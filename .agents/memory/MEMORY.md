@@ -1,1 +1,1 @@
-- [SETTLE Phase 1 scope](settle-phase1-scope.md) — keep work UI-only; no auth, backend, database, or real expense flows until Phase 2 is requested.
+- [OPUSOL API boundary](opusol-api-boundary.md) — API contract is a proposal until the independent backend owner confirms it; never present demo behavior as real auth or balances.

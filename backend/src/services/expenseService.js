@@ -201,25 +201,52 @@ export const createExpense = async (
       [expense.id]
     );
 
+    const creatorQuery = await client.query(
+      `SELECT name, email FROM users WHERE id = $1`,
+      [createdBy]
+    );
+    const creatorUser = creatorQuery.rows[0] || {};
+
     await client.query('COMMIT');
+
+    const mappedPayers = payersQuery.rows.map((p) => ({
+      id: p.id,
+      userId: p.user_id,
+      name: p.name,
+      email: p.email,
+      amount: p.amount,
+    }));
+    const primaryPayer = mappedPayers[0];
+    const payerName = primaryPayer?.name || creatorUser.name || 'Member';
 
     return {
       id: expense.id,
+      group_id: expense.group_id,
       groupId: expense.group_id,
       title: expense.title,
       description: expense.description,
+      total_amount: expense.total_amount,
       totalAmount: expense.total_amount,
+      split_type: expense.split_type,
       splitType: expense.split_type,
+      created_by: expense.created_by,
       createdBy: expense.created_by,
+      creator_name: creatorUser.name,
+      creatorName: creatorUser.name,
+      creator_email: creatorUser.email,
+      creatorEmail: creatorUser.email,
+      creator: {
+        id: expense.created_by,
+        name: creatorUser.name,
+        email: creatorUser.email,
+      },
+      payer_name: payerName,
+      payerName: payerName,
+      created_at: expense.created_at,
       createdAt: expense.created_at,
+      updated_at: expense.updated_at,
       updatedAt: expense.updated_at,
-      payers: payersQuery.rows.map((p) => ({
-        id: p.id,
-        userId: p.user_id,
-        name: p.name,
-        email: p.email,
-        amount: p.amount,
-      })),
+      payers: mappedPayers,
       splits: splitsQuery.rows.map((s) => ({
         id: s.id,
         userId: s.user_id,
@@ -308,24 +335,43 @@ export const getGroupExpenses = async (groupId) => {
     });
   }
 
-  return expenses.map((e) => ({
-    id: e.id,
-    groupId: e.group_id,
-    title: e.title,
-    description: e.description,
-    totalAmount: e.total_amount,
-    splitType: e.split_type,
-    createdBy: e.created_by,
-    creator: {
-      id: e.created_by,
-      name: e.creator_name,
-      email: e.creator_email,
-    },
-    createdAt: e.created_at,
-    updatedAt: e.updated_at,
-    payers: payersByExpense[e.id] || [],
-    splits: splitsByExpense[e.id] || [],
-  }));
+  return expenses.map((e) => {
+    const payers = payersByExpense[e.id] || [];
+    const splits = splitsByExpense[e.id] || [];
+    const primaryPayer = payers[0];
+    const payerName = primaryPayer?.name || e.creator_name || 'Member';
+
+    return {
+      id: e.id,
+      group_id: e.group_id,
+      groupId: e.group_id,
+      title: e.title,
+      description: e.description,
+      total_amount: e.total_amount,
+      totalAmount: e.total_amount,
+      split_type: e.split_type,
+      splitType: e.split_type,
+      created_by: e.created_by,
+      createdBy: e.created_by,
+      creator_name: e.creator_name,
+      creatorName: e.creator_name,
+      creator_email: e.creator_email,
+      creatorEmail: e.creator_email,
+      creator: {
+        id: e.created_by,
+        name: e.creator_name,
+        email: e.creator_email,
+      },
+      payer_name: payerName,
+      payerName: payerName,
+      created_at: e.created_at,
+      createdAt: e.created_at,
+      updated_at: e.updated_at,
+      updatedAt: e.updated_at,
+      payers,
+      splits,
+    };
+  });
 };
 
 /**

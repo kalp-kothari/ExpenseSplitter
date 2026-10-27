@@ -77,6 +77,9 @@ export const createGroup = async (name, description, userId) => {
       [group.id, userId]
     );
 
+    const userRes = await client.query('SELECT name FROM users WHERE id = $1', [userId]);
+    const creatorName = userRes.rows[0]?.name || null;
+
     await client.query('COMMIT');
 
     return {
@@ -84,6 +87,7 @@ export const createGroup = async (name, description, userId) => {
       name: group.name,
       description: group.description,
       createdBy: group.created_by,
+      creatorName,
       createdAt: group.created_at,
       updatedAt: group.updated_at,
       memberCount: 1,
@@ -108,6 +112,7 @@ export const getUserGroups = async (userId) => {
       g.name,
       g.description,
       g.created_by AS "createdBy",
+      u.name AS "creatorName",
       g.created_at AS "createdAt",
       g.updated_at AS "updatedAt",
       gm.role AS "userRole",
@@ -118,6 +123,7 @@ export const getUserGroups = async (userId) => {
       ) AS "memberCount"
     FROM groups g
     JOIN group_members gm ON g.id = gm.group_id
+    LEFT JOIN users u ON g.created_by = u.id
     WHERE gm.user_id = $1 AND gm.status = 'active'
     ORDER BY g.created_at DESC`,
     [userId]

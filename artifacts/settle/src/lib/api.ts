@@ -131,7 +131,9 @@ export interface GroupItem {
   name: string;
   description?: string;
   created_by: string;
+  createdBy?: string;
   creator_name?: string;
+  creatorName?: string;
   creator_email?: string;
   role?: string;
   member_count?: number;
@@ -142,34 +144,55 @@ export interface GroupItem {
 }
 
 export interface PayerItem {
+  id?: string;
   userId: string;
   userName?: string;
+  name?: string;
   userEmail?: string;
+  email?: string;
   amount: number;
 }
 
 export interface SplitItem {
+  id?: string;
   userId: string;
   userName?: string;
+  name?: string;
   userEmail?: string;
+  email?: string;
   amount: number;
-  percentage?: number;
+  percentage?: number | null;
 }
 
 export interface ExpenseItem {
   id: string;
   group_id: string;
+  groupId?: string;
   title: string;
   description?: string;
   total_amount: number;
+  totalAmount?: number;
   split_type: 'equal' | 'exact' | 'percentage';
+  splitType?: 'equal' | 'exact' | 'percentage';
   created_by: string;
+  createdBy?: string;
   creator_name?: string;
+  creatorName?: string;
   creator_email?: string;
+  creatorEmail?: string;
+  creator?: {
+    id: string;
+    name: string;
+    email: string;
+  };
+  payer_name?: string;
+  payerName?: string;
   payers?: PayerItem[];
   splits?: SplitItem[];
   created_at: string;
+  createdAt?: string;
   updated_at: string;
+  updatedAt?: string;
 }
 
 export interface MemberBalance {
@@ -243,6 +266,10 @@ export const authApi = {
     apiRequest<AuthResult>('/api/auth/login', {
       method: 'POST',
       body: JSON.stringify(payload),
+    }),
+  logout: () =>
+    apiRequest<void>('/api/auth/logout', {
+      method: 'POST',
     }),
   me: () => apiRequest<{ user: User }>('/api/auth/me'),
 };

@@ -41,6 +41,22 @@ app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(compression());
 
+// Cookie parsing middleware
+app.use((req, res, next) => {
+  const cookieHeader = req.headers?.cookie;
+  req.cookies = {};
+  if (cookieHeader) {
+    cookieHeader.split(';').forEach((cookie) => {
+      const parts = cookie.split('=');
+      const name = parts[0]?.trim();
+      if (name) {
+        req.cookies[name] = decodeURIComponent(parts.slice(1).join('=').trim());
+      }
+    });
+  }
+  next();
+});
+
 if (config.nodeEnv !== 'test') {
   app.use(morgan('dev'));
 }

@@ -59,6 +59,21 @@ export const getToneForString = (str?: string | null): string => {
   return TONES[Math.abs(hash) % TONES.length];
 };
 
+export const formatExpenseDate = (val?: string | number | Date | null): string => {
+  if (!val) return 'Today';
+  try {
+    const d = new Date(val);
+    if (isNaN(d.getTime())) return 'Today';
+    return d.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  } catch {
+    return 'Today';
+  }
+};
+
 type Store = {
   groups: Group[];
   expenses: Expense[];
@@ -144,8 +159,11 @@ function AppShell({
       <aside className="op-sidebar">
         <Brand />
         <div className="op-workspace">
-          <span>WORKSPACE</span>
-          <b>The Opusol Team</b>
+          <span>O</span>
+          <div>
+            <small>WORKSPACE</small>
+            <b>The Opusol Team</b>
+          </div>
         </div>
         <nav>
           <span className="op-label">Navigation</span>
@@ -382,7 +400,12 @@ function AddExpenseModal({
     [members, selected]
   );
 
-  const numAmount = parseFloat(amount) || 0;
+  const cleanFloat = (val: string | number) => {
+    const n = typeof val === 'number' ? val : parseFloat(val);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  const numAmount = cleanFloat(amount);
 
   // When splitType changes, auto-populate exact and percentage shares evenly
   const handleSplitTypeChange = (type: 'equal' | 'exact' | 'percentage') => {
@@ -392,28 +415,39 @@ function AddExpenseModal({
     if (count === 0) return;
 
     if (type === 'exact') {
-      const each = count > 0 && numAmount > 0 ? (numAmount / count).toFixed(2) : '';
+      const totalPaise = Math.round(numAmount * 100);
+      const basePaise = Math.floor(totalPaise / count);
+      const remainder = totalPaise % count;
       const exacts: Record<string, string> = {};
-      activeMembers.forEach((m) => (exacts[m.id] = each));
+      activeMembers.forEach((m, idx) => {
+        // Allocate remaining paise to payer (or first participant)
+        const isTarget = m.id === payerId || (idx === 0 && !activeMembers.some((x) => x.id === payerId));
+        const paise = basePaise + (isTarget ? remainder : 0);
+        exacts[m.id] = (paise / 100).toFixed(2);
+      });
       setExactAmounts(exacts);
     } else if (type === 'percentage') {
-      const basePct = (100 / count).toFixed(2);
+      const basePct = Number((100 / count).toFixed(2));
+      const diffPct = Number((100 - basePct * count).toFixed(2));
       const pcts: Record<string, string> = {};
-      activeMembers.forEach((m) => (pcts[m.id] = basePct));
+      activeMembers.forEach((m, idx) => {
+        const isTarget = m.id === payerId || (idx === 0 && !activeMembers.some((x) => x.id === payerId));
+        pcts[m.id] = (basePct + (isTarget ? diffPct : 0)).toFixed(2);
+      });
       setPercentages(pcts);
     }
   };
 
   // Calculations for Exact split
   const allocatedExact = useMemo(() => {
-    return activeMembers.reduce((sum, m) => sum + (parseFloat(exactAmounts[m.id]) || 0), 0);
+    return activeMembers.reduce((sum, m) => sum + cleanFloat(exactAmounts[m.id]), 0);
   }, [activeMembers, exactAmounts]);
 
   const remainingExact = Number((numAmount - allocatedExact).toFixed(2));
 
   // Calculations for Percentage split
   const allocatedPct = useMemo(() => {
-    return activeMembers.reduce((sum, m) => sum + (parseFloat(percentages[m.id]) || 0), 0);
+    return activeMembers.reduce((sum, m) => sum + cleanFloat(percentages[m.id]), 0);
   }, [activeMembers, percentages]);
 
   const remainingPct = Number((100 - allocatedPct).toFixed(2));
@@ -448,36 +482,52 @@ function AddExpenseModal({
       return;
     }
 
-    const totalPaise = Math.round(numAmount * 100);
+    // Safely round total to integer paise
+    const totalPaise = Math.round(cleanFloat(numAmount) * 100);
 
     let splitsPayload: { userId: string; amount?: number; percentage?: number }[] = [];
 
     if (splitType === 'equal') {
       splitsPayload = activeMembers.map((m) => ({ userId: m.id }));
     } else if (splitType === 'exact') {
-      if (Math.abs(remainingExact) >= 0.01) {
-        setFormError(`Exact shares must sum to ${money(numAmount)}. Currently: ${money(allocatedExact)} (${money(remainingExact)} remaining).`);
-        return;
-      }
-      // Convert shares to paise, ensuring exact sum
-      const paiseShares = activeMembers.map((m) => Math.round((parseFloat(exactAmounts[m.id]) || 0) * 100));
+      const paiseShares = activeMembers.map((m) => Math.round(cleanFloat(exactAmounts[m.id]) * 100));
       const sumPaise = paiseShares.reduce((a, b) => a + b, 0);
-      const diff = totalPaise - sumPaise;
-      if (diff !== 0 && paiseShares.length > 0) {
-        paiseShares[0] += diff; // reconcile 1-paise rounding difference
+      const diffPaise = totalPaise - sumPaise;
+
+      // Reconcile small decimal rounding differences (within 5 paise) to the payer
+      if (Math.abs(diffPaise) <= 5) {
+        const payerIdx = activeMembers.findIndex((m) => m.id === payerId);
+        const targetIdx = payerIdx >= 0 ? payerIdx : 0;
+        paiseShares[targetIdx] += diffPaise;
+      } else {
+        setFormError(
+          `Exact shares must sum to ${money(numAmount)}. Currently: ${money(sumPaise / 100)} (${money(Math.abs(diffPaise) / 100)} ${diffPaise > 0 ? 'remaining' : 'over'}).`
+        );
+        return;
       }
       splitsPayload = activeMembers.map((m, idx) => ({
         userId: m.id,
         amount: paiseShares[idx],
       }));
     } else if (splitType === 'percentage') {
-      if (Math.abs(remainingPct) >= 0.05) {
-        setFormError(`Percentages must sum to exactly 100%. Currently: ${allocatedPct.toFixed(1)}% (${remainingPct.toFixed(1)}% remaining).`);
+      const parsedPcts = activeMembers.map((m) => cleanFloat(percentages[m.id]));
+      const sumPcts = parsedPcts.reduce((a, b) => a + b, 0);
+      const diffPct = Number((100 - sumPcts).toFixed(2));
+
+      // Reconcile small decimal rounding differences (within 0.1%) to the payer
+      if (Math.abs(diffPct) <= 0.1) {
+        const payerIdx = activeMembers.findIndex((m) => m.id === payerId);
+        const targetIdx = payerIdx >= 0 ? payerIdx : 0;
+        parsedPcts[targetIdx] = Number((parsedPcts[targetIdx] + diffPct).toFixed(2));
+      } else {
+        setFormError(
+          `Percentages must sum to exactly 100%. Currently: ${sumPcts.toFixed(1)}% (${diffPct.toFixed(1)}% remaining).`
+        );
         return;
       }
-      splitsPayload = activeMembers.map((m) => ({
+      splitsPayload = activeMembers.map((m, idx) => ({
         userId: m.id,
-        percentage: parseFloat(percentages[m.id]) || 0,
+        percentage: parsedPcts[idx],
       }));
     }
 
@@ -921,7 +971,7 @@ function ExpenseTable({
             <span className="op-expense-info">
               <b>{x.title}</b>
               <small>
-                {x.group} · {x.date} · Paid by {x.payer.name}
+                {x.group} · {formatExpenseDate(x.date)} · Paid by {x.payer.name || 'You'}
               </small>
             </span>
             <span className="op-expense-amount">
@@ -973,7 +1023,8 @@ function Dashboard({
     setBusy(true);
     setFormError('');
     try {
-      await onCreateGroup(name.trim(), 'Created via OPUSOL');
+      const creatorDesc = user ? `Created by ${user.name}` : 'Created by member';
+      await onCreateGroup(name.trim(), creatorDesc);
       setName('');
       setModal(null);
     } catch (err: unknown) {
@@ -1135,9 +1186,11 @@ function Dashboard({
 function GroupsPage({
   store,
   onCreateGroup,
+  user,
 }: {
   store: Store;
   onCreateGroup?: (name: string, description: string) => Promise<void>;
+  user?: User | null;
 }) {
   const [modal, setModal] = useState(false);
   const [name, setName] = useState('');
@@ -1150,7 +1203,8 @@ function GroupsPage({
     setBusy(true);
     setErr('');
     try {
-      await onCreateGroup(name.trim(), 'Created via OPUSOL');
+      const creatorDesc = user ? `Created by ${user.name}` : 'Created by member';
+      await onCreateGroup(name.trim(), creatorDesc);
       setName('');
       setModal(false);
     } catch (e: unknown) {
@@ -1251,42 +1305,48 @@ function GroupDetail({
   const [actionError, setActionError] = useState('');
   const [busy, setBusy] = useState(false);
 
-  // Group balances, suggestions, and members from API
+  // Group balances, suggestions, members, expenses, and settlements from API
   const [groupBalances, setGroupBalances] = useState<MemberBalance[]>([]);
   const [suggestions, setSuggestions] = useState<SettlementSuggestion[]>([]);
   const [groupMembers, setGroupMembers] = useState<GroupMemberItem[]>([]);
+  const [groupExpenses, setGroupExpenses] = useState<any[]>([]);
+  const [groupSettlements, setGroupSettlements] = useState<SettlementItem[]>([]);
 
   const group = store.groups.find((g) => g.id === id);
 
-  useEffect(() => {
-    if (isLive && id) {
-      balancesApi
-        .get(id)
-        .then((res) => {
-          if (res?.balances && Array.isArray(res.balances)) {
-            setGroupBalances(res.balances);
-          }
-        })
-        .catch(() => {});
-
-      balancesApi
-        .suggestions(id)
-        .then((res) => {
-          if (res?.suggestions && Array.isArray(res.suggestions)) {
-            setSuggestions(res.suggestions);
-          }
-        })
-        .catch(() => {});
-
-      groupsApi
-        .getMembers(id)
-        .then((mList) => {
-          if (Array.isArray(mList)) {
-            setGroupMembers(mList);
-          }
-        })
-        .catch(() => {});
+  // Synchronously reload all live data for this specific group
+  const reloadGroupData = async () => {
+    if (!isLive || !id) return;
+    try {
+      const [balRes, suggRes, memRes, expRes, settRes] = await Promise.allSettled([
+        balancesApi.get(id),
+        balancesApi.suggestions(id),
+        groupsApi.getMembers(id),
+        expensesApi.list(id),
+        settlementsApi.list(id),
+      ]);
+      if (balRes.status === 'fulfilled' && balRes.value?.balances && Array.isArray(balRes.value.balances)) {
+        setGroupBalances(balRes.value.balances);
+      }
+      if (suggRes.status === 'fulfilled' && suggRes.value?.suggestions && Array.isArray(suggRes.value.suggestions)) {
+        setSuggestions(suggRes.value.suggestions);
+      }
+      if (memRes.status === 'fulfilled' && Array.isArray(memRes.value)) {
+        setGroupMembers(memRes.value);
+      }
+      if (expRes.status === 'fulfilled' && Array.isArray(expRes.value)) {
+        setGroupExpenses(expRes.value);
+      }
+      if (settRes.status === 'fulfilled' && Array.isArray(settRes.value)) {
+        setGroupSettlements(settRes.value);
+      }
+    } catch (err) {
+      console.error('Failed to reload group data', err);
     }
+  };
+
+  useEffect(() => {
+    reloadGroupData();
   }, [id, isLive]);
 
   if (!group) {
@@ -1315,7 +1375,36 @@ function GroupDetail({
     );
   }
 
-  const rows = store.expenses.filter((e) => e.group === group.name);
+  // Convert live group expenses to Expense objects for this group
+  const liveExpenses: Expense[] =
+    isLive && groupExpenses.length > 0
+      ? groupExpenses.map((e) => {
+          const amountRs = (e.total_amount || 0) / 100;
+          return {
+            id: e.id,
+            title: e.title,
+            group: group.name,
+            payer: {
+              name: e.creator_name || 'Member',
+              initials: getInitials(e.creator_name || 'M'),
+              tone: getToneForString(e.creator_name || 'M'),
+            },
+            date: new Date(e.created_at).toLocaleDateString(),
+            amount: amountRs,
+            share: amountRs,
+            status: (e.created_by === user?.id ? 'You paid' : 'Owed to you') as 'You paid' | 'Owed to you',
+            icon: 'bag',
+            tone: 'mint',
+          };
+        })
+      : store.expenses.filter((e) => e.group === group.name);
+
+  // Calculate group totals directly by summing e.total_amount / 100 from the group's live expenses query
+  const liveTotal = isLive
+    ? groupExpenses.length > 0
+      ? groupExpenses.reduce((sum, e) => sum + (e.total_amount || 0) / 100, 0)
+      : group.total || 0
+    : liveExpenses.reduce((sum, e) => sum + (e.amount || 0), 0);
 
   // Combine members from live API or group model
   const displayMembers: { id: string; name: string; role?: string }[] =
@@ -1341,10 +1430,8 @@ function GroupDetail({
         await groupsApi.addMember(id, memberEmail.trim());
         setMemberEmail('');
         setAddMemberModal(false);
+        await reloadGroupData();
         onRefresh();
-        // reload members
-        const updated = await groupsApi.getMembers(id);
-        if (Array.isArray(updated)) setGroupMembers(updated);
       } else {
         group.members.push({
           name: memberEmail.split('@')[0],
@@ -1380,6 +1467,7 @@ function GroupDetail({
             `Leave request submitted for creator approval. Balance snapshot recorded: ${money((res.balance_snapshot || 0) / 100)}.`
           );
         }
+        await reloadGroupData();
         onRefresh();
       } else {
         setLeaveStatusMsg(
@@ -1408,10 +1496,25 @@ function GroupDetail({
         });
         setSettleModal(false);
         setSettleAmount('');
+        await reloadGroupData();
         onRefresh();
       }
     } catch (err: unknown) {
       setActionError(err instanceof Error ? err.message : 'Failed to record settlement');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleUpdateSettlement = async (settlementId: string, status: 'completed' | 'cancelled') => {
+    setBusy(true);
+    setActionError('');
+    try {
+      await settlementsApi.update(settlementId, status);
+      await reloadGroupData();
+      onRefresh();
+    } catch (err: unknown) {
+      setActionError(err instanceof Error ? err.message : 'Failed to update settlement');
     } finally {
       setBusy(false);
     }
@@ -1456,14 +1559,14 @@ function GroupDetail({
         <Balance
           icon={Wallet}
           title="Group total"
-          value={group.total}
+          value={Number(liveTotal.toFixed(2))}
           detail="Total group expenses"
           accent
         />
         <Metric
           icon={Users}
           title="Active Members"
-          value={group.memberCount}
+          value={displayMembers.length || group.memberCount}
           detail="Members sharing costs"
         />
       </div>
@@ -1533,10 +1636,10 @@ function GroupDetail({
                       : 'Settled'}
                     <small>
                       {net > 0
-                        ? 'Owed to member'
+                        ? 'Gets back'
                         : net < 0
-                        ? 'Member owes'
-                        : 'Balance is zero'}
+                        ? 'Owes'
+                        : 'Settled up'}
                     </small>
                   </span>
                 </div>
@@ -1596,6 +1699,74 @@ function GroupDetail({
         </section>
       )}
 
+      {/* Group Settlements */}
+      {isLive && groupSettlements.length > 0 && (
+        <section className="op-section">
+          <div className="op-section-title">
+            <div>
+              <h2>Settlements</h2>
+              <p>Payment requests and status for this group.</p>
+            </div>
+            <button
+              className="op-secondary op-small"
+              onClick={() => setSettleModal(true)}
+            >
+              <Banknote size={16} /> Record Settlement
+            </button>
+          </div>
+          <div className="op-groups">
+            {groupSettlements.map((s) => {
+              const isPending = s.status === 'pending';
+              const isCompleted = s.status === 'completed';
+              const canDecide = isPending && user && (s.receiver_id === user.id || s.payer_id === user.id);
+              return (
+                <div className="op-group" key={s.id} style={{ cursor: 'default' }}>
+                  <span
+                    className={`op-group-icon ${
+                      isCompleted ? 'mint' : isPending ? 'butter' : 'coral'
+                    }`}
+                  >
+                    <Banknote size={18} />
+                  </span>
+                  <span className="op-group-info">
+                    <b>
+                      {s.payer_name || 'Member'} → {s.receiver_name || 'Member'}
+                    </b>
+                    <small>
+                      {new Date(s.created_at).toLocaleDateString()} · Status:{' '}
+                      <b style={{ textTransform: 'capitalize' }}>{s.status}</b>
+                    </small>
+                  </span>
+                  <span className="op-group-total">
+                    {money(s.amount / 100)}
+                    {canDecide && (
+                      <span style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
+                        <button
+                          className="op-primary op-small"
+                          style={{ padding: '0 8px', minHeight: '24px', fontSize: '10px' }}
+                          onClick={() => handleUpdateSettlement(s.id, 'completed')}
+                          disabled={busy}
+                        >
+                          <Check size={12} /> Confirm
+                        </button>
+                        <button
+                          className="op-secondary op-small"
+                          style={{ padding: '0 8px', minHeight: '24px', fontSize: '10px' }}
+                          onClick={() => handleUpdateSettlement(s.id, 'cancelled')}
+                          disabled={busy}
+                        >
+                          <X size={12} /> Cancel
+                        </button>
+                      </span>
+                    )}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
       {/* Expenses */}
       <section className="op-section">
         <div className="op-section-title">
@@ -1610,7 +1781,7 @@ function GroupDetail({
             <Plus size={16} /> Add Expense
           </button>
         </div>
-        <ExpenseTable items={rows} />
+        <ExpenseTable items={liveExpenses} />
       </section>
 
       {/* Add Expense Modal */}
@@ -1624,6 +1795,7 @@ function GroupDetail({
           user={user}
           onSubmit={async (payload) => {
             await onCreateExpense(payload);
+            await reloadGroupData();
             onRefresh();
           }}
         />
@@ -1907,8 +2079,17 @@ export function OpusolApp() {
     balances: { total: 0, owe: 0, owed: 0 },
     settlements: [],
   });
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [isLiveMode, setIsLiveMode] = useState<boolean>(false);
+  const [currentUser, setCurrentUser] = useState<User | null>(() => {
+    try {
+      const saved = localStorage.getItem('opusol-user');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [isLiveMode, setIsLiveMode] = useState<boolean>(() => {
+    return Boolean(getToken() || localStorage.getItem('opusol-user'));
+  });
   const [loading, setLoading] = useState<boolean>(false);
 
   const activeStore = isLiveMode ? realStore : demoStore;
@@ -1986,20 +2167,37 @@ export function OpusolApp() {
       const mappedGroups: Group[] = groupResults.map(
         ({ group: g, expenses, balances, membersList, totalRs }) => {
           for (const e of expenses) {
-            const amountRs = e.total_amount / 100;
+            const amountPaise = e.total_amount ?? (e as any).totalAmount ?? 0;
+            const amountRs = amountPaise / 100;
+
+            const primaryPayer = (e.payers && e.payers[0]) || null;
+            const payerUserId = primaryPayer?.userId || (e as any).user_id || e.created_by || (e as any).createdBy;
+            const isMe = currentUser && (payerUserId === currentUser.id || e.created_by === currentUser.id);
+
+            const payerName =
+              primaryPayer?.name ||
+              (e as any).payer_name ||
+              (e as any).payerName ||
+              e.creator_name ||
+              (e as any).creatorName ||
+              e.creator?.name ||
+              (isMe ? currentUser?.name || 'You' : 'Member');
+
+            const formattedDate = formatExpenseDate(e.created_at || (e as any).createdAt);
+
             allExpenses.push({
               id: e.id,
               title: e.title,
               group: g.name,
               payer: {
-                name: e.creator_name || 'Member',
-                initials: getInitials(e.creator_name || 'M'),
-                tone: getToneForString(e.creator_name || 'M'),
+                name: payerName,
+                initials: getInitials(payerName),
+                tone: getToneForString(payerName),
               },
-              date: new Date(e.created_at).toLocaleDateString(),
+              date: formattedDate,
               amount: amountRs,
               share: amountRs,
-              status: e.created_by === currentUser?.id ? 'You paid' : 'Owed to you',
+              status: isMe ? 'You paid' : 'Owed to you',
               icon: 'bag',
               tone: 'mint',
             });
@@ -2026,15 +2224,28 @@ export function OpusolApp() {
             (g as any).member_count ||
             1;
 
+          const creator =
+            (g as any).creatorName ||
+            (g as any).creator_name ||
+            ((g.createdBy || g.created_by) === currentUser?.id ? currentUser?.name : null);
+
+          const groupContext = creator
+            ? `Created by ${creator}`
+            : g.description && !g.description.includes('Created via OPUSOL')
+            ? g.description
+            : `${count} members sharing costs`;
+
           return {
             id: g.id,
             name: g.name,
-            context: g.description || `${count} members sharing costs`,
+            context: groupContext,
             members,
             memberCount: count,
             total: Number(totalRs.toFixed(2)),
             tone: getToneForString(g.name),
             icon: 'home',
+            createdBy: g.createdBy || (g as any).created_by,
+            creatorName: creator || undefined,
           };
         }
       );
@@ -2062,22 +2273,29 @@ export function OpusolApp() {
 
   // Check auth session on startup
   useEffect(() => {
-    const token = getToken();
-    if (token) {
-      authApi
-        .me()
-        .then((res) => {
-          if (res?.user) {
-            setCurrentUser(res.user);
-            setIsLiveMode(true);
-          }
-        })
-        .catch(() => {
+    // If we have either token in localStorage or cookie sent with credentials: 'include'
+    authApi
+      .me()
+      .then((res) => {
+        if (res?.user) {
+          setCurrentUser(res.user);
+          try {
+            localStorage.setItem('opusol-user', JSON.stringify(res.user));
+          } catch {}
+          setIsLiveMode(true);
+        }
+      })
+      .catch((err: any) => {
+        // Only clear token if server explicitly returned 401 Unauthorized
+        if (err?.status === 401) {
           clearToken();
+          try {
+            localStorage.removeItem('opusol-user');
+          } catch {}
           setIsLiveMode(false);
           setCurrentUser(null);
-        });
-    }
+        }
+      });
   }, []);
 
   // Fetch real data when user or live mode is set
@@ -2087,32 +2305,44 @@ export function OpusolApp() {
     }
   }, [isLiveMode, currentUser]);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await authApi.logout();
+    } catch {}
     clearToken();
+    try {
+      localStorage.removeItem('opusol-user');
+    } catch {}
     setCurrentUser(null);
     setIsLiveMode(false);
     setLoc('/login');
   };
 
   const handleAuthSuccess = (user: User) => {
+    try {
+      localStorage.setItem('opusol-user', JSON.stringify(user));
+    } catch {}
     setCurrentUser(user);
     setIsLiveMode(true);
   };
 
   const handleCreateGroup = async (name: string, description: string) => {
     if (isLiveMode) {
-      await groupsApi.create({ name, description });
+      const creatorDesc = currentUser ? `Created by ${currentUser.name}` : description;
+      await groupsApi.create({ name, description: creatorDesc });
       await fetchRealData();
     } else {
+      const creator = currentUser?.name || 'You';
       const newGroup: Group = {
         id: `group-${Date.now()}`,
         name,
-        context: description || 'Created just now',
-        members: [{ name: 'You', initials: 'ME', tone: 'mint' }],
+        context: `Created by ${creator}`,
+        members: [{ name: creator, initials: getInitials(creator), tone: 'mint' }],
         memberCount: 1,
         total: 0,
         tone: 'mint',
         icon: 'home',
+        creatorName: creator,
       };
       setDemoStore((prev) => ({
         ...prev,
@@ -2192,7 +2422,7 @@ export function OpusolApp() {
 
   const routeView = useMemo(() => {
     if (cleanLoc === '/groups')
-      return <GroupsPage store={activeStore} onCreateGroup={handleCreateGroup} />;
+      return <GroupsPage store={activeStore} onCreateGroup={handleCreateGroup} user={currentUser} />;
     if (cleanLoc === '/expenses')
       return (
         <ExpensesPage

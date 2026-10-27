@@ -8,6 +8,8 @@ export type Group = {
   total: number;
   tone: string;
   icon: string;
+  createdBy?: string;
+  creatorName?: string;
 };
 export type Expense = {
   id: string;

@@ -1,5 +1,5 @@
 {
-  "name": "expense-splitter-backend",
+  "name": "@workspace/backend",
   "version": "1.0.0",
   "description": "Backend API for Expense Splitter application",
   "type": "module",

@@ -1,11 +1,6 @@
 // API Client for the OPUSOL / Expense Splitter Backend
 
-const DEFAULT_LOCAL_BACKEND = 'http://localhost:5000';
-
-const API_BASE_URL = (
-  import.meta.env.VITE_API_BASE_URL ??
-  (typeof window !== 'undefined' && window.location.hostname === 'localhost' ? DEFAULT_LOCAL_BACKEND : '')
-).replace(/\/+$/, '');
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/+$/, '');
 
 export class ApiError extends Error {
   constructor(

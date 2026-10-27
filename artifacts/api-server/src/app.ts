@@ -26,9 +26,17 @@ app.use(
   }),
 );
 app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
 app.use("/api", router);
+// @ts-ignore
+const backendAppPromise = import("../../../backend/src/app.js").then((m) => m.default);
+app.use(async (req, res, next) => {
+  try {
+    const backendApp = await backendAppPromise;
+    return backendApp(req, res, next);
+  } catch (err) {
+    return next(err);
+  }
+});
 
 export default app;

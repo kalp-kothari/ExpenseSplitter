@@ -1,21 +1,29 @@
 import db from '../config/database.js';
 import { BadRequestError, NotFoundError, ForbiddenError } from '../utils/errors.js';
 import { isValidUUID } from '../utils/helpers.js';
-import { getGroupBalances } from './balanceService.js';
+import { getSettlementSuggestions } from './balanceService.js';
 
 /**
  * Format a settlement database row into an API object
+ * with both flat (snake_case and camelCase) and nested user objects
  */
-const formatSettlement = (row) => ({
+export const formatSettlement = (row) => ({
   id: row.id,
   groupId: row.group_id,
+  group_id: row.group_id,
   payerId: row.payer_id,
+  payer_id: row.payer_id,
+  payerName: row.payer_name,
+  payer_name: row.payer_name,
   payer: {
     id: row.payer_id,
     name: row.payer_name,
     email: row.payer_email,
   },
   receiverId: row.receiver_id,
+  receiver_id: row.receiver_id,
+  receiverName: row.receiver_name,
+  receiver_name: row.receiver_name,
   receiver: {
     id: row.receiver_id,
     name: row.receiver_name,
@@ -24,13 +32,18 @@ const formatSettlement = (row) => ({
   amount: row.amount,
   status: row.status,
   createdBy: row.created_by,
+  created_by: row.created_by,
+  creatorName: row.creator_name,
+  creator_name: row.creator_name,
   creator: {
     id: row.created_by,
     name: row.creator_name,
     email: row.creator_email,
   },
   createdAt: row.created_at,
+  created_at: row.created_at,
   updatedAt: row.updated_at,
+  updated_at: row.updated_at,
 });
 
 /**
@@ -53,7 +66,8 @@ export const createSettlement = async (groupId, { payerId, receiverId, amount },
     throw new BadRequestError('Payer and receiver cannot be the same user');
   }
 
-  if (typeof amount !== 'number' || amount <= 0 || !Number.isInteger(amount)) {
+  const parsedAmount = Math.round(Number(amount));
+  if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
     throw new BadRequestError('Settlement amount must be a positive integer in paise');
   }
 
@@ -67,25 +81,28 @@ export const createSettlement = async (groupId, { payerId, receiverId, amount },
     throw new BadRequestError('Both payer and receiver must be active members of the group');
   }
 
-  // Calculate current balances for payer and receiver in this group
-  const groupBalances = await getGroupBalances(groupId);
-  const payerBalance = groupBalances.balances.find((b) => b.userId === payerId);
-  const receiverBalance = groupBalances.balances.find((b) => b.userId === receiverId);
-
-  // Verify payer has negative balance (owes money)
-  if (!payerBalance || payerBalance.netBalance >= 0) {
-    throw new BadRequestError('Payer does not owe any money in this group');
+  // Validate that the creator is either the payer or the receiver
+  if (createdBy !== payerId && createdBy !== receiverId) {
+    throw new ForbiddenError('Only the payer or receiver can initiate a settlement request');
   }
 
-  // Verify receiver has positive balance (is owed money)
-  if (!receiverBalance || receiverBalance.netBalance <= 0) {
-    throw new BadRequestError('Receiver is not owed any money in this group');
+  // Live pairwise debt verification: payer must owe money to receiver
+  const { suggestions } = await getSettlementSuggestions(groupId);
+  const pairwiseDebt = suggestions.find(
+    (s) =>
+      ((s.from?.userId || s.fromUserId) === payerId) &&
+      ((s.to?.userId || s.toUserId) === receiverId)
+  );
+  const maxDebt = pairwiseDebt ? pairwiseDebt.amount : 0;
+
+  if (maxDebt <= 0) {
+    throw new BadRequestError('Payer does not owe any money to this receiver');
   }
 
-  // Verify amount <= min(Math.abs(payerBalance), receiverBalance)
-  const maxAllowed = Math.min(Math.abs(payerBalance.netBalance), receiverBalance.netBalance);
-  if (amount > maxAllowed) {
-    throw new BadRequestError(`Settlement amount cannot exceed ${maxAllowed} paise`);
+  if (parsedAmount > maxDebt) {
+    throw new BadRequestError(
+      `Settlement amount (₹${(parsedAmount / 100).toFixed(2)}) cannot exceed the current debt of ₹${(maxDebt / 100).toFixed(2)}`
+    );
   }
 
   // Insert settlement with status='pending'
@@ -93,7 +110,7 @@ export const createSettlement = async (groupId, { payerId, receiverId, amount },
     `INSERT INTO settlements (group_id, payer_id, receiver_id, amount, status, created_by)
      VALUES ($1, $2, $3, $4, 'pending', $5)
      RETURNING id`,
-    [groupId, payerId, receiverId, amount, createdBy]
+    [groupId, payerId, receiverId, parsedAmount, createdBy]
   );
 
   const settlementId = insertResult.rows[0].id;
@@ -181,9 +198,9 @@ export const updateSettlement = async (settlementId, status, userId) => {
     throw new ForbiddenError('You are not authorized to update this settlement');
   }
 
-  // For 'completed': only payer or receiver can confirm
-  if (status === 'completed' && !isPayer && !isReceiver) {
-    throw new ForbiddenError('Only the payer or receiver can confirm settlement completion');
+  // For 'completed': ONLY the receiver can confirm/accept
+  if (status === 'completed' && !isReceiver) {
+    throw new ForbiddenError('Only the recipient can confirm and complete a settlement');
   }
 
   // For 'cancelled': payer, receiver, or creator can cancel (already satisfied by auth check)

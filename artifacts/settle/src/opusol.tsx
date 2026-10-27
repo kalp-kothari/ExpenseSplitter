@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, Route, Switch, useLocation } from 'wouter';
 import {
-  ArrowDownLeft, ArrowLeft, ArrowUpRight, Banknote, Check, ChevronRight, CircleHelp,
+  ArrowDownLeft, ArrowLeft, ArrowUpRight, Banknote, Calendar, Check, ChevronRight, CircleHelp,
   Coffee, House, LogOut, Moon, Plus, ReceiptText, RefreshCw, Sun, UserPlus, Users, Wallet, X,
 } from 'lucide-react';
 import {
@@ -77,7 +77,7 @@ export const formatExpenseDate = (val?: string | number | Date | null): string =
 type Store = {
   groups: Group[];
   expenses: Expense[];
-  balances: { total: number; owe: number; owed: number };
+  balances: { total: number; owe: number; owed: number; monthlySpend?: number };
   settlements: SettlementItem[];
 };
 
@@ -96,6 +96,7 @@ function loadDemoStore(): Store {
                   total: Number(parsed.balances.total) || 0,
                   owe: Number(parsed.balances.owe) || 0,
                   owed: Number(parsed.balances.owed) || 0,
+                  monthlySpend: Number(parsed.balances.monthlySpend) || 4800,
                 }
               : seedBalances,
           settlements: Array.isArray(parsed.settlements) ? parsed.settlements : [],
@@ -1074,6 +1075,12 @@ function Dashboard({
           value={store.balances.owed}
           detail="Owed by other members"
         />
+        <Balance
+          icon={Calendar}
+          title="Spent this month"
+          value={store.balances.monthlySpend ?? 0}
+          detail="Your personal contribution across all groups"
+        />
       </section>
 
       <section className="op-section">
@@ -1481,10 +1488,38 @@ function GroupDetail({
     }
   };
 
+  // Helper to get live pairwise debt from payer to receiver in paise
+  const getPairwiseDebt = (pId: string, rId: string): number => {
+    if (!pId || !rId || pId === rId) return 0;
+    const match = suggestions.find((s: any) => {
+      const fromId = s.from?.userId || s.fromUserId;
+      const toId = s.to?.userId || s.toUserId;
+      return fromId === pId && toId === rId;
+    });
+    return match ? match.amount : 0;
+  };
+
+  const currentPairwiseDebt = getPairwiseDebt(settlePayer, settleReceiver);
+
   const handleCreateSettlement = async (e: FormEvent) => {
     e.preventDefault();
     const val = parseFloat(settleAmount);
     if (!settlePayer || !settleReceiver || !Number.isFinite(val) || val <= 0) return;
+    if (user && settlePayer !== user.id && settleReceiver !== user.id) {
+      setActionError('You can only create settlements where you are the payer or receiver.');
+      return;
+    }
+    const maxAllowedDebt = getPairwiseDebt(settlePayer, settleReceiver);
+    if (maxAllowedDebt <= 0) {
+      const pName = displayMembers.find((m) => m.id === settlePayer)?.name || 'Payer';
+      const rName = displayMembers.find((m) => m.id === settleReceiver)?.name || 'Receiver';
+      setActionError(`${pName} owes ₹0.00 to ${rName}. Cannot create settlement request.`);
+      return;
+    }
+    if (val > maxAllowedDebt / 100) {
+      setActionError(`Amount cannot exceed the current debt of ${money(maxAllowedDebt / 100)}.`);
+      return;
+    }
     setBusy(true);
     setActionError('');
     try {
@@ -1562,6 +1597,12 @@ function GroupDetail({
           value={Number(liveTotal.toFixed(2))}
           detail="Total group expenses"
           accent
+        />
+        <Balance
+          icon={Calendar}
+          title="Spent this month"
+          value={store.balances.monthlySpend ?? 0}
+          detail="Your personal contribution across all groups"
         />
         <Metric
           icon={Users}
@@ -1679,18 +1720,25 @@ function GroupDetail({
                   </span>
                   <span className="op-group-total">
                     {money(amtRs)}
-                    <button
-                      className="op-primary op-small"
-                      style={{ marginTop: '6px', fontSize: '10px' }}
-                      onClick={() => {
-                        setSettlePayer(fromId);
-                        setSettleReceiver(toId);
-                        setSettleAmount(amtRs.toFixed(2));
-                        setSettleModal(true);
-                      }}
-                    >
-                      Settle Up
-                    </button>
+                    {(!user || user.id === fromId || user.id === toId) ? (
+                      <button
+                        className="op-primary op-small"
+                        style={{ marginTop: '6px', fontSize: '10px' }}
+                        onClick={() => {
+                          setSettlePayer(fromId);
+                          setSettleReceiver(toId);
+                          setSettleAmount(amtRs.toFixed(2));
+                          setActionError('');
+                          setSettleModal(true);
+                        }}
+                      >
+                        Settle Up
+                      </button>
+                    ) : (
+                      <small style={{ marginTop: '6px', fontSize: '9px', color: 'hsl(var(--muted-foreground))' }}>
+                        Only {fromName} or {toName} can settle
+                      </small>
+                    )}
                   </span>
                 </div>
               );
@@ -1718,7 +1766,19 @@ function GroupDetail({
             {groupSettlements.map((s) => {
               const isPending = s.status === 'pending';
               const isCompleted = s.status === 'completed';
-              const canDecide = isPending && user && (s.receiver_id === user.id || s.payer_id === user.id);
+              const pId = s.payer_id || (s as any).payerId;
+              const rId = s.receiver_id || (s as any).receiverId;
+              const pName = s.payer_name || (s as any).payerName || (s as any).payer?.name || 'Member';
+              const rName = s.receiver_name || (s as any).receiverName || (s as any).receiver?.name || 'Member';
+              const isReceiver = user && rId === user.id;
+              const isPayer = user && pId === user.id;
+              const isGroupCreator = user && (group as any)?.createdBy === user.id;
+
+              // Only the receiving member can confirm and accept the settlement
+              const canConfirm = isPending && isReceiver;
+              // Payer, receiver, or group creator can cancel
+              const canCancel = isPending && (isPayer || isReceiver || isGroupCreator);
+
               return (
                 <div className="op-group" key={s.id} style={{ cursor: 'default' }}>
                   <span
@@ -1730,33 +1790,41 @@ function GroupDetail({
                   </span>
                   <span className="op-group-info">
                     <b>
-                      {s.payer_name || 'Member'} → {s.receiver_name || 'Member'}
+                      {pName} → {rName}
                     </b>
                     <small>
-                      {new Date(s.created_at).toLocaleDateString()} · Status:{' '}
+                      {formatExpenseDate(s.created_at || (s as any).createdAt)} · Status:{' '}
                       <b style={{ textTransform: 'capitalize' }}>{s.status}</b>
+                      {isPending && isPayer && ' (Awaiting receiver confirmation)'}
+                      {isPending && isReceiver && ' (Action required)'}
                     </small>
                   </span>
                   <span className="op-group-total">
                     {money(s.amount / 100)}
-                    {canDecide && (
+                    {isPending && (
                       <span style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
-                        <button
-                          className="op-primary op-small"
-                          style={{ padding: '0 8px', minHeight: '24px', fontSize: '10px' }}
-                          onClick={() => handleUpdateSettlement(s.id, 'completed')}
-                          disabled={busy}
-                        >
-                          <Check size={12} /> Confirm
-                        </button>
-                        <button
-                          className="op-secondary op-small"
-                          style={{ padding: '0 8px', minHeight: '24px', fontSize: '10px' }}
-                          onClick={() => handleUpdateSettlement(s.id, 'cancelled')}
-                          disabled={busy}
-                        >
-                          <X size={12} /> Cancel
-                        </button>
+                        {canConfirm && (
+                          <button
+                            className="op-primary op-small"
+                            style={{ padding: '0 8px', minHeight: '24px', fontSize: '10px' }}
+                            onClick={() => handleUpdateSettlement(s.id, 'completed')}
+                            disabled={busy}
+                            title="Confirm you have received the payment"
+                          >
+                            <Check size={12} /> Accept
+                          </button>
+                        )}
+                        {canCancel && (
+                          <button
+                            className="op-secondary op-small"
+                            style={{ padding: '0 8px', minHeight: '24px', fontSize: '10px' }}
+                            onClick={() => handleUpdateSettlement(s.id, 'cancelled')}
+                            disabled={busy}
+                            title="Cancel settlement request"
+                          >
+                            <X size={12} /> Cancel
+                          </button>
+                        )}
                       </span>
                     )}
                   </span>
@@ -1874,15 +1942,47 @@ function GroupDetail({
               <select
                 required
                 value={settlePayer}
-                onChange={(e) => setSettlePayer(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSettlePayer(val);
+                  let rId = settleReceiver;
+                  if (user && val !== user.id && val !== '') {
+                    rId = user.id;
+                    setSettleReceiver(user.id);
+                  }
+                  if (val && rId && val !== rId) {
+                    const debt = getPairwiseDebt(val, rId);
+                    if (debt > 0) setSettleAmount((debt / 100).toFixed(2));
+                  }
+                }}
               >
                 <option value="">Select payer</option>
                 {displayMembers.map((m) => {
-                  const bal = groupBalances.find((b) => b.userId === m.id);
-                  const note = bal ? ` (${bal.netBalance < 0 ? `Owes ${money(Math.abs(bal.netBalance / 100))}` : bal.netBalance > 0 ? `Owed ${money(bal.netBalance / 100)}` : 'Settled'})` : '';
+                  if (settleReceiver && m.id === settleReceiver) return null;
+                  let note = '';
+                  let isDisabled = false;
+                  if (settleReceiver) {
+                    const debt = getPairwiseDebt(m.id, settleReceiver);
+                    if (debt > 0) {
+                      note = ` (Owes ${money(debt / 100)})`;
+                    } else {
+                      note = ' (Owes ₹0.00 · No debt)';
+                      isDisabled = true;
+                    }
+                  } else {
+                    const totalOwedByM = suggestions
+                      .filter((s: any) => (s.from?.userId || s.fromUserId) === m.id)
+                      .reduce((sum: number, s: any) => sum + s.amount, 0);
+                    if (totalOwedByM > 0) {
+                      note = ` (Total debt ${money(totalOwedByM / 100)})`;
+                    } else {
+                      note = ' (No debt · Settled)';
+                      isDisabled = true;
+                    }
+                  }
                   return (
-                    <option key={m.id} value={m.id}>
-                      {m.name} {note}
+                    <option key={m.id} value={m.id} disabled={isDisabled}>
+                      {m.name}{note}
                     </option>
                   );
                 })}
@@ -1893,15 +1993,47 @@ function GroupDetail({
               <select
                 required
                 value={settleReceiver}
-                onChange={(e) => setSettleReceiver(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSettleReceiver(val);
+                  let pId = settlePayer;
+                  if (user && val !== user.id && val !== '') {
+                    pId = user.id;
+                    setSettlePayer(user.id);
+                  }
+                  if (pId && val && pId !== val) {
+                    const debt = getPairwiseDebt(pId, val);
+                    if (debt > 0) setSettleAmount((debt / 100).toFixed(2));
+                  }
+                }}
               >
                 <option value="">Select receiver</option>
                 {displayMembers.map((m) => {
-                  const bal = groupBalances.find((b) => b.userId === m.id);
-                  const note = bal ? ` (${bal.netBalance > 0 ? `Owed ${money(bal.netBalance / 100)}` : bal.netBalance < 0 ? `Owes ${money(Math.abs(bal.netBalance / 100))}` : 'Settled'})` : '';
+                  if (settlePayer && m.id === settlePayer) return null;
+                  let note = '';
+                  let isDisabled = false;
+                  if (settlePayer) {
+                    const debt = getPairwiseDebt(settlePayer, m.id);
+                    if (debt > 0) {
+                      note = ` (Owes ${money(debt / 100)})`;
+                    } else {
+                      note = ' (Owes ₹0.00 · No debt)';
+                      isDisabled = true;
+                    }
+                  } else {
+                    const totalOwedToM = suggestions
+                      .filter((s: any) => (s.to?.userId || s.toUserId) === m.id)
+                      .reduce((sum: number, s: any) => sum + s.amount, 0);
+                    if (totalOwedToM > 0) {
+                      note = ` (Owed ${money(totalOwedToM / 100)})`;
+                    } else {
+                      note = ' (Owed ₹0.00)';
+                      isDisabled = true;
+                    }
+                  }
                   return (
-                    <option key={m.id} value={m.id}>
-                      {m.name} {note}
+                    <option key={m.id} value={m.id} disabled={isDisabled}>
+                      {m.name}{note}
                     </option>
                   );
                 })}
@@ -1918,13 +2050,28 @@ function GroupDetail({
                 onChange={(e) => setSettleAmount(e.target.value)}
                 placeholder="0.00"
               />
+              {settlePayer && settleReceiver && (
+                currentPairwiseDebt > 0 ? (
+                  <small style={{ color: 'hsl(var(--primary))', fontSize: '11px', display: 'block', marginTop: '4px' }}>
+                    Live debt: {displayMembers.find((m) => m.id === settlePayer)?.name || 'Payer'} owes {displayMembers.find((m) => m.id === settleReceiver)?.name || 'Receiver'} {money(currentPairwiseDebt / 100)}
+                  </small>
+                ) : (
+                  <small style={{ color: '#c25437', fontSize: '11px', display: 'block', marginTop: '4px' }}>
+                    {displayMembers.find((m) => m.id === settlePayer)?.name || 'Payer'} owes ₹0.00 to {displayMembers.find((m) => m.id === settleReceiver)?.name || 'Receiver'}. Cannot create settlement request.
+                  </small>
+                )
+              )}
             </label>
             {actionError && <p className="op-error">{actionError}</p>}
             <p className="op-form-note">
               Records a pending settlement in the database. When confirmed by the
               recipient, debts are marked as completed.
             </p>
-            <button className="op-primary" type="submit" disabled={busy}>
+            <button
+              className="op-primary"
+              type="submit"
+              disabled={busy || (settlePayer && settleReceiver ? currentPairwiseDebt <= 0 : false)}
+            >
               {busy ? 'Recording...' : 'Record Settlement'}
             </button>
           </form>
@@ -2076,7 +2223,7 @@ export function OpusolApp() {
   const [realStore, setRealStore] = useState<Store>({
     groups: [],
     expenses: [],
-    balances: { total: 0, owe: 0, owed: 0 },
+    balances: { total: 0, owe: 0, owed: 0, monthlySpend: 0 },
     settlements: [],
   });
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
@@ -2254,6 +2401,30 @@ export function OpusolApp() {
         allSettlements.push(...res.settlements);
       }
 
+      // Calculate personal contribution across all groups in current month
+      const now = new Date();
+      const curYear = now.getFullYear();
+      const curMonth = now.getMonth();
+      let totalMonthlySpendPaise = 0;
+
+      for (const res of groupResults) {
+        for (const e of res.expenses) {
+          const expDate = new Date(e.created_at || (e as any).createdAt);
+          if (!isNaN(expDate.getTime()) && expDate.getFullYear() === curYear && expDate.getMonth() === curMonth) {
+            if (currentUser && Array.isArray(e.splits)) {
+              const mySplit = e.splits.find((s: any) => (s.userId || s.user_id) === currentUser.id);
+              if (mySplit && typeof mySplit.amount === 'number') {
+                totalMonthlySpendPaise += mySplit.amount;
+              }
+            } else if (currentUser && (e.created_by === currentUser.id || (e as any).createdBy === currentUser.id)) {
+              const count = res.membersList.length || 1;
+              totalMonthlySpendPaise += Math.round((e.total_amount || (e as any).totalAmount || 0) / count);
+            }
+          }
+        }
+      }
+      const monthlySpendRs = Number((totalMonthlySpendPaise / 100).toFixed(2));
+
       setRealStore({
         groups: mappedGroups,
         expenses: allExpenses.sort((a, b) => (a.date < b.date ? 1 : -1)),
@@ -2261,6 +2432,7 @@ export function OpusolApp() {
           total: Number((totalOwed - totalOwe).toFixed(2)),
           owe: Number(totalOwe.toFixed(2)),
           owed: Number(totalOwed.toFixed(2)),
+          monthlySpend: monthlySpendRs,
         },
         settlements: allSettlements,
       });

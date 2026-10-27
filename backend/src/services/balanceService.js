@@ -94,44 +94,105 @@ export const getGroupBalances = async (groupId) => {
 };
 
 /**
- * Calculate greedy settlement suggestions to minimize transactions
+ * Calculate direct pairwise settlement suggestions between members
  */
 export const getSettlementSuggestions = async (groupId) => {
-  const balanceData = await getGroupBalances(groupId);
+  if (!groupId || !isValidUUID(groupId)) {
+    throw new BadRequestError('Invalid group ID');
+  }
 
-  const debtors = balanceData.balances
-    .filter((b) => b.netBalance < 0)
-    .map((b) => ({ ...b, netBalance: b.netBalance }))
-    .sort((a, b) => Math.abs(b.netBalance) - Math.abs(a.netBalance));
+  // Fetch all active members in the group
+  const membersRes = await db.query(
+    `SELECT u.id, u.name, u.email
+     FROM group_members gm
+     JOIN users u ON u.id = gm.user_id
+     WHERE gm.group_id = $1 AND gm.status = 'active'`,
+    [groupId]
+  );
+  const users = {};
+  for (const m of membersRes.rows) {
+    users[m.id] = { userId: m.id, name: m.name, email: m.email };
+  }
 
-  const creditors = balanceData.balances
-    .filter((b) => b.netBalance > 0)
-    .map((b) => ({ ...b, netBalance: b.netBalance }))
-    .sort((a, b) => b.netBalance - a.netBalance);
+  // Fetch expenses with payers and splits
+  const splitsRes = await db.query(
+    `SELECT ep.user_id as payer_id, ep.amount as payer_amount,
+            es.user_id as borrower_id, es.amount as split_amount,
+            e.total_amount
+     FROM expense_splits es
+     JOIN expense_payers ep ON ep.expense_id = es.expense_id
+     JOIN expenses e ON e.id = es.expense_id
+     WHERE e.group_id = $1`,
+    [groupId]
+  );
+
+  const pairDebts = {};
+  const getPairKey = (u1, u2) => (u1 < u2 ? `${u1}_${u2}` : `${u2}_${u1}`);
+
+  for (const row of splitsRes.rows) {
+    if (row.payer_id === row.borrower_id) continue;
+    const owed =
+      row.total_amount > 0
+        ? Math.round((row.split_amount * row.payer_amount) / row.total_amount)
+        : row.split_amount;
+    const k = getPairKey(row.borrower_id, row.payer_id);
+    if (!pairDebts[k]) {
+      pairDebts[k] = {
+        u1: row.borrower_id < row.payer_id ? row.borrower_id : row.payer_id,
+        u2: row.borrower_id < row.payer_id ? row.payer_id : row.borrower_id,
+        net: 0,
+      };
+    }
+    if (row.borrower_id < row.payer_id) {
+      pairDebts[k].net += owed; // borrower owes payer
+    } else {
+      pairDebts[k].net -= owed;
+    }
+  }
+
+  // Adjust for completed settlements
+  const settsRes = await db.query(
+    `SELECT payer_id, receiver_id, amount
+     FROM settlements
+     WHERE group_id = $1 AND status = 'completed'`,
+    [groupId]
+  );
+  for (const s of settsRes.rows) {
+    const k = getPairKey(s.payer_id, s.receiver_id);
+    if (!pairDebts[k]) {
+      pairDebts[k] = {
+        u1: s.payer_id < s.receiver_id ? s.payer_id : s.receiver_id,
+        u2: s.payer_id < s.receiver_id ? s.receiver_id : s.payer_id,
+        net: 0,
+      };
+    }
+    if (s.payer_id < s.receiver_id) {
+      pairDebts[k].net -= s.amount;
+    } else {
+      pairDebts[k].net += s.amount;
+    }
+  }
 
   const suggestions = [];
-  let debtorIdx = 0;
-  let creditorIdx = 0;
-
-  while (debtorIdx < debtors.length && creditorIdx < creditors.length) {
-    const debtor = debtors[debtorIdx];
-    const creditor = creditors[creditorIdx];
-    const amount = Math.min(Math.abs(debtor.netBalance), creditor.netBalance);
-
-    if (amount > 0) {
+  for (const k of Object.keys(pairDebts)) {
+    const { u1, u2, net } = pairDebts[k];
+    if (net > 0 && users[u1] && users[u2]) {
       suggestions.push({
-        from: { userId: debtor.userId, name: debtor.name, email: debtor.email },
-        to: { userId: creditor.userId, name: creditor.name, email: creditor.email },
-        amount,
+        from: users[u1],
+        to: users[u2],
+        amount: net,
+      });
+    } else if (net < 0 && users[u1] && users[u2]) {
+      suggestions.push({
+        from: users[u2],
+        to: users[u1],
+        amount: Math.abs(net),
       });
     }
-
-    debtor.netBalance += amount;
-    creditor.netBalance -= amount;
-
-    if (debtor.netBalance === 0) debtorIdx++;
-    if (creditor.netBalance === 0) creditorIdx++;
   }
+
+  // Sort descending by amount
+  suggestions.sort((a, b) => b.amount - a.amount);
 
   return {
     suggestions,

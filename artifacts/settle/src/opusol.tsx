@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 're
 import { Link, Route, Switch, useLocation } from 'wouter';
 import {
   ArrowDownLeft, ArrowLeft, ArrowUpRight, Banknote, Calendar, Check, ChevronRight, CircleHelp,
-  Coffee, House, LogOut, Moon, Plus, ReceiptText, RefreshCw, Sun, UserPlus, Users, Wallet, X,
+  Coffee, House, LogIn, LogOut, Moon, Plus, ReceiptText, RefreshCw, Sun, UserPlus, Users, Wallet, X,
 } from 'lucide-react';
 import {
   balances as seedBalances,
@@ -155,6 +155,15 @@ function AppShell({
     ['Settlements', '/settlements', Banknote],
   ] as const;
 
+  const mobileLinks = user
+    ? links
+    : ([
+        ['Dashboard', '/dashboard', Wallet],
+        ['Groups', '/groups', Users],
+        ['Expenses', '/expenses', ReceiptText],
+        ['Sign In', '/login', LogIn],
+      ] as const);
+
   return (
     <div className="op-app">
       <aside className="op-sidebar">
@@ -193,21 +202,42 @@ function AppShell({
           </div>
 
           <div className="op-account">
-            <span className="op-avatar">{getInitials(user?.name || 'Aarav Mehta')}</span>
-            <span>
-              <b>{user?.name || 'Aarav Mehta'}</b>
-              <small style={{ display: 'block', fontSize: '10px', color: 'hsl(var(--muted-foreground))' }}>
-                {user?.email || 'demo@opusol.app'}
-              </small>
-            </span>
-            <button
-              onClick={onLogout}
-              className="op-theme"
-              title={isLive ? 'Log out' : 'Switch account'}
-              style={{ width: '32px', height: '32px' }}
-            >
-              <LogOut size={14} />
-            </button>
+            {user ? (
+              <>
+                <span className="op-avatar">{getInitials(user.name)}</span>
+                <span>
+                  <b>{user.name}</b>
+                  <small style={{ display: 'block', fontSize: '10px', color: 'hsl(var(--muted-foreground))' }}>
+                    {user.email}
+                  </small>
+                </span>
+                <button
+                  onClick={onLogout}
+                  className="op-theme"
+                  title="Log out"
+                  style={{ width: '32px', height: '32px' }}
+                >
+                  <LogOut size={14} />
+                </button>
+              </>
+            ) : (
+              <>
+                <span className="op-avatar">?</span>
+                <span>
+                  <b>Guest Mode</b>
+                  <small style={{ display: 'block', fontSize: '10px', color: 'hsl(var(--muted-foreground))' }}>
+                    Not signed in
+                  </small>
+                </span>
+                <Link
+                  href="/login"
+                  className="op-primary op-small"
+                  style={{ textDecoration: 'none', marginLeft: 'auto', padding: '0 10px', fontSize: '11px', height: '30px' }}
+                >
+                  Sign In
+                </Link>
+              </>
+            )}
           </div>
         </div>
       </aside>
@@ -225,11 +255,11 @@ function AppShell({
           <div className="op-top-actions">
             {isLive ? (
               <span className="demo-pill" style={{ background: '#e6f7ec', color: '#1f7a37' }}>
-                <i style={{ background: '#1f7a37' }} /> LIVE BACKEND
+                <i style={{ background: '#1f7a37' }} /> LIVE
               </span>
             ) : (
               <span className="demo-pill">
-                <i /> DEMO MODE
+                <i /> DEMO
               </span>
             )}
             <button
@@ -243,13 +273,48 @@ function AppShell({
             <button onClick={toggle} className="op-theme" title="Toggle theme">
               {dark ? <Sun size={16} /> : <Moon size={16} />}
             </button>
+            {user ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span
+                  className="op-avatar"
+                  title={`${user.name} (${user.email})`}
+                  style={{ width: '32px', height: '32px', fontSize: '11px' }}
+                >
+                  {getInitials(user.name)}
+                </span>
+                <button
+                  onClick={onLogout}
+                  className="op-theme"
+                  title="Log out"
+                  style={{ width: '32px', height: '32px' }}
+                >
+                  <LogOut size={14} />
+                </button>
+              </div>
+            ) : (
+              <Link
+                href="/login"
+                className="op-primary op-small"
+                style={{
+                  textDecoration: 'none',
+                  height: '32px',
+                  padding: '0 12px',
+                  fontSize: '11px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                }}
+              >
+                <LogIn size={13} /> Sign in
+              </Link>
+            )}
           </div>
         </header>
 
         {children}
 
         <nav className="op-mobile-nav">
-          {links.map(([label, href, Icon]) => (
+          {mobileLinks.map(([label, href, Icon]) => (
             <Link
               key={label}
               href={href}
@@ -890,9 +955,17 @@ function Auth({
           )}
         </p>
 
-        <Link href="/dashboard" className="op-demo-link">
+        <button
+          type="button"
+          onClick={() => {
+            localStorage.setItem('opusol-explore-demo', 'true');
+            setLocation('/dashboard');
+          }}
+          className="op-demo-link"
+          style={{ background: 'none', border: 'none', cursor: 'pointer', width: '100%' }}
+        >
           Or explore sample data in offline Demo Mode →
-        </Link>
+        </button>
       </div>
 
       <footer className="op-auth-foot">
@@ -1039,6 +1112,32 @@ function Dashboard({
 
   return (
     <div className="op-content">
+      {!isLive && (
+        <div
+          className="op-note"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '12px',
+            marginBottom: '20px',
+            background: 'hsl(var(--accent)/.4)',
+            borderColor: 'hsl(var(--primary)/.35)',
+            flexWrap: 'wrap',
+          }}
+        >
+          <span>
+            💡 <b>Offline Demo Mode:</b> You are viewing sample data. Sign in to view your real groups and expenses.
+          </span>
+          <Link
+            href="/login"
+            className="op-primary op-small"
+            style={{ textDecoration: 'none', height: '28px', fontSize: '11px', padding: '0 10px' }}
+          >
+            Sign In to Live App →
+          </Link>
+        </div>
+      )}
       <div className="op-welcome">
         <div>
           <span className="op-kicker">
@@ -1064,6 +1163,12 @@ function Dashboard({
           accent
         />
         <Balance
+          icon={Calendar}
+          title="Spent this month"
+          value={store.balances.monthlySpend ?? 0}
+          detail="Your personal contribution across all groups"
+        />
+        <Balance
           icon={ArrowDownLeft}
           title="You owe"
           value={store.balances.owe}
@@ -1074,12 +1179,6 @@ function Dashboard({
           title="Owed to you"
           value={store.balances.owed}
           detail="Owed by other members"
-        />
-        <Balance
-          icon={Calendar}
-          title="Spent this month"
-          value={store.balances.monthlySpend ?? 0}
-          detail="Your personal contribution across all groups"
         />
       </section>
 
@@ -1406,13 +1505,6 @@ function GroupDetail({
         })
       : store.expenses.filter((e) => e.group === group.name);
 
-  // Calculate group totals directly by summing e.total_amount / 100 from the group's live expenses query
-  const liveTotal = isLive
-    ? groupExpenses.length > 0
-      ? groupExpenses.reduce((sum, e) => sum + (e.total_amount || 0) / 100, 0)
-      : group.total || 0
-    : liveExpenses.reduce((sum, e) => sum + (e.amount || 0), 0);
-
   // Combine members from live API or group model
   const displayMembers: { id: string; name: string; role?: string }[] =
     isLive && groupMembers.length > 0
@@ -1426,6 +1518,54 @@ function GroupDetail({
           name: m.name,
           role: 'member',
         }));
+
+  // User's personal contribution in this specific group only
+  const userGroupContribution = useMemo(() => {
+    const now = new Date();
+    const curYear = now.getFullYear();
+    const curMonth = now.getMonth();
+    let totalPaise = 0;
+    let monthlyPaise = 0;
+
+    if (isLive && user) {
+      for (const e of groupExpenses) {
+        let mySplitAmount = 0;
+        if (Array.isArray(e.splits) && e.splits.length > 0) {
+          const mySplit = e.splits.find((s: any) => (s.userId || s.user_id) === user.id);
+          if (mySplit && typeof mySplit.amount === 'number') {
+            mySplitAmount = mySplit.amount;
+          }
+        } else if (e.created_by === user.id || (e as any).createdBy === user.id) {
+          const count = displayMembers.length || 1;
+          mySplitAmount = Math.round((e.total_amount || (e as any).totalAmount || 0) / count);
+        }
+
+        totalPaise += mySplitAmount;
+        const expDate = new Date(e.created_at || (e as any).createdAt);
+        if (!isNaN(expDate.getTime()) && expDate.getFullYear() === curYear && expDate.getMonth() === curMonth) {
+          monthlyPaise += mySplitAmount;
+        }
+      }
+    } else {
+      for (const e of liveExpenses) {
+        const share = e.share || e.amount / 3;
+        totalPaise += Math.round(share * 100);
+        monthlyPaise += Math.round(share * 100);
+      }
+    }
+
+    return {
+      total: Number((totalPaise / 100).toFixed(2)),
+      monthly: Number((monthlyPaise / 100).toFixed(2)),
+    };
+  }, [isLive, user, groupExpenses, liveExpenses, displayMembers]);
+
+  // Calculate group totals directly by summing e.total_amount / 100 from the group's live expenses query
+  const liveTotal = isLive
+    ? groupExpenses.length > 0
+      ? groupExpenses.reduce((sum, e) => sum + (e.total_amount || 0) / 100, 0)
+      : group.total || 0
+    : liveExpenses.reduce((sum, e) => sum + (e.amount || 0), 0);
 
   const handleAddMember = async (e: FormEvent) => {
     e.preventDefault();
@@ -1600,9 +1740,13 @@ function GroupDetail({
         />
         <Balance
           icon={Calendar}
-          title="Spent this month"
-          value={store.balances.monthlySpend ?? 0}
-          detail="Your personal contribution across all groups"
+          title="Spent in this group"
+          value={userGroupContribution.monthly}
+          detail={
+            userGroupContribution.total !== userGroupContribution.monthly
+              ? `Your share this month (${money(userGroupContribution.total)} total in group)`
+              : 'Your personal contribution in this group'
+          }
         />
         <Metric
           icon={Users}
@@ -2455,6 +2599,10 @@ export function OpusolApp() {
             localStorage.setItem('opusol-user', JSON.stringify(res.user));
           } catch {}
           setIsLiveMode(true);
+        } else {
+          if (!getToken() && localStorage.getItem('opusol-explore-demo') !== 'true') {
+            setLoc('/login');
+          }
         }
       })
       .catch((err: any) => {
@@ -2466,6 +2614,9 @@ export function OpusolApp() {
           } catch {}
           setIsLiveMode(false);
           setCurrentUser(null);
+        }
+        if (!getToken() && localStorage.getItem('opusol-explore-demo') !== 'true') {
+          setLoc('/login');
         }
       });
   }, []);
@@ -2484,6 +2635,7 @@ export function OpusolApp() {
     clearToken();
     try {
       localStorage.removeItem('opusol-user');
+      localStorage.removeItem('opusol-explore-demo');
     } catch {}
     setCurrentUser(null);
     setIsLiveMode(false);
